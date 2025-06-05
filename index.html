@@ -1,18 +1,21 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MCQ Quiz 100 Batch, show 20 each click</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; }
-  button { margin: 5px; padding: 10px 15px; font-size: 16px; cursor: pointer; }
-  .question-block { margin-bottom: 25px; padding-bottom: 10px; border-bottom: 1px solid #ddd; }
-  .question-text { font-weight: bold; font-size: 18px; margin-bottom: 8px; }
-  .options { margin-left: 20px; margin-bottom: 6px; }
-  .option { margin: 3px 0; }
-  .correct-answer { color: green; font-weight: bold; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fast MCQs with Answer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    button { margin: 5px; padding: 10px 15px; font-size: 16px; cursor: pointer; }
+    .question-block { margin-bottom: 25px; padding-bottom: 10px; border-bottom: 1px solid #ddd; }
+    .question-text { font-weight: bold; font-size: 18px; margin-bottom: 8px; }
+    .options { margin-left: 20px; margin-bottom: 6px; }
+    .option { margin: 3px 0; }
+    .correct-answer { color: green; font-weight: bold; }
+    .loading { font-style: italic; color: #444; margin-top: 10px; }
+  </style>
 </head>
 <body>
 
@@ -21,7 +24,7 @@
 <button id="cloud-btn">Cloud Computing</button>
 <button id="cyber-btn">Cyber Security</button>
 
-<div id="quiz-area"></div>
+<div id="quiz-area" class="loading">Click a topic to load MCQs.</div>
 
 <script>
 function decodeHtml(html) {
@@ -36,86 +39,84 @@ const topicToCategory = {
   cyber: 18
 };
 
-// Store 100 questions per topic, initially empty
-const questionsBatch = {
+const questionsCache = {
   webdev: [],
   cloud: [],
   cyber: []
 };
 
-// To keep track of shown question indexes to avoid repeats
 const shownIndexes = {
   webdev: new Set(),
   cloud: new Set(),
   cyber: new Set()
 };
 
-// Fetch 100 questions silently, no UI change
-async function fetch100Questions(topic) {
-  if (questionsBatch[topic].length >= 100) return; // Already fetched
+const fetchingStatus = {
+  webdev: false,
+  cloud: false,
+  cyber: false
+};
 
-  try {
-    const amount = 100;
-    const category = topicToCategory[topic];
-    const url = `https://opentdb.com/api.php?amount=${amount}&category=${category}&type=multiple`;
-    const response = await fetch(url);
-    const data = await response.json();
+async function fetchQuestions(topic, total = 100, batchSize = 20) {
+  const category = topicToCategory[topic];
+  for (let i = 0; i < total; i += batchSize) {
+    try {
+      const url = `https://opentdb.com/api.php?amount=${batchSize}&category=${category}&type=multiple`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.response_code === 0 && data.results.length) {
+        const newQs = data.results.map(q => {
+          const correct = decodeHtml(q.correct_answer);
+          const options = [...q.incorrect_answers.map(decodeHtml), correct];
+          for (let i = options.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [options[i], options[j]] = [options[j], options[i]];
+          }
+          return {
+            question: decodeHtml(q.question),
+            correct_answer: correct,
+            options
+          };
+        });
+        questionsCache[topic].push(...newQs);
 
-    if (data.response_code === 0 && data.results.length) {
-      questionsBatch[topic] = data.results.map(q => {
-        const question = decodeHtml(q.question);
-        const correct_answer = decodeHtml(q.correct_answer);
-        const options = [...q.incorrect_answers.map(decodeHtml), correct_answer];
-        // Shuffle options
-        for (let i = options.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [options[i], options[j]] = [options[j], options[i]];
+        // If we now have at least 20, and nothing is displayed yet, show MCQs
+        const quizArea = document.getElementById('quiz-area');
+        if (questionsCache[topic].length >= 20 && quizArea.innerHTML.includes("Loading")) {
+          show20Questions(topic);
         }
-        return { question, correct_answer, options };
-      });
+      }
+    } catch (e) {
+      console.error("Fetch error (ignored):", e);
     }
-  } catch (e) {
-    // Fail silently, no UI message
-    console.error('Fetch error:', e);
   }
 }
 
-// Show 20 questions randomly from cached batch, no repeats until all shown
 function show20Questions(topic) {
   const quizArea = document.getElementById('quiz-area');
+  const qset = questionsCache[topic];
+  if (!qset.length) return;
+
   quizArea.innerHTML = '';
 
-  const batch = questionsBatch[topic];
-  if (!batch.length) {
-    // Batch not fetched yet - try fetch silently, show empty for now
-    fetch100Questions(topic);
-    return;
+  const shown = shownIndexes[topic];
+  let available = qset.map((_, i) => i).filter(i => !shown.has(i));
+
+  if (available.length < 20) {
+    shown.clear();
+    available = qset.map((_, i) => i);
   }
 
-  const shownSet = shownIndexes[topic];
-
-  // Get 20 unique random indexes from batch that are not in shownSet
-  let availableIndexes = [];
-  for (let i = 0; i < batch.length; i++) {
-    if (!shownSet.has(i)) availableIndexes.push(i);
-  }
-
-  // If less than 20 left, reset shownSet to allow repeats
-  if (availableIndexes.length < 20) {
-    shownSet.clear();
-    availableIndexes = [...Array(batch.length).keys()];
-  }
-
-  // Shuffle availableIndexes and pick 20
-  for (let i = availableIndexes.length - 1; i > 0; i--) {
+  // Pick 20 random
+  for (let i = available.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [availableIndexes[i], availableIndexes[j]] = [availableIndexes[j], availableIndexes[i]];
+    [available[i], available[j]] = [available[j], available[i]];
   }
-  const selectedIndexes = availableIndexes.slice(0, 20);
 
-  selectedIndexes.forEach(idx => {
-    shownSet.add(idx);
-    const q = batch[idx];
+  const toShow = available.slice(0, 20);
+  toShow.forEach(i => {
+    shown.add(i);
+    const q = qset[i];
 
     const block = document.createElement('div');
     block.className = 'question-block';
@@ -144,18 +145,33 @@ function show20Questions(topic) {
   });
 }
 
-// On button click: fetch 100 questions silently if not fetched, then show 20 questions
-async function onTopicClick(topic) {
-  if (questionsBatch[topic].length < 100) {
-    await fetch100Questions(topic);
+function loadTopic(topic) {
+  const quizArea = document.getElementById('quiz-area');
+
+  // If we have enough questions already, show them immediately
+  if (questionsCache[topic].length >= 20) {
+    show20Questions(topic);
+  } else {
+    // Show loading message only if we have fewer than 10 MCQs
+    if (questionsCache[topic].length < 10) {
+      quizArea.innerHTML = '<div class="loading">Loading...</div>';
+    } else {
+      // If we have a few (like 10-19), go ahead and show them
+      show20Questions(topic);
+    }
   }
-  show20Questions(topic);
+
+  // Start fetching in background (only once)
+  if (!fetchingStatus[topic]) {
+    fetchingStatus[topic] = true;
+    fetchQuestions(topic);
+  }
 }
 
-// Attach event listeners
-document.getElementById('webdev-btn').onclick = () => onTopicClick('webdev');
-document.getElementById('cloud-btn').onclick = () => onTopicClick('cloud');
-document.getElementById('cyber-btn').onclick = () => onTopicClick('cyber');
+// Bind buttons
+document.getElementById('webdev-btn').onclick = () => loadTopic('webdev');
+document.getElementById('cloud-btn').onclick = () => loadTopic('cloud');
+document.getElementById('cyber-btn').onclick = () => loadTopic('cyber');
 </script>
 
 </body>
